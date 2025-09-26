@@ -3,32 +3,35 @@ import sys
 import random
 import math
 
-from pygame.examples.music_drop_fade import music_file_types
-
 pygame.init()
-pygame.mixer.init()
+
+try:
+    pygame.mixer.init()
+except Exception as e:
+    print("Seems you don't have mixer. Oh well..")
 
 # ============= SOUND SETUP ================
 try:
-    sound_lineclear = pygame.mixer.Sound("assets/linescore.wav")
+    sound_lineclear = pygame.mixer.Sound("assets/new_linescore.wav")
     sound_levelup = pygame.mixer.Sound("assets/levelup.wav")
     sound_gameover = pygame.mixer.Sound("assets/gameover.wav")
     sound_startgame = pygame.mixer.Sound("assets/start.wav")
     pygame.mixer.music.load("assets/background_ambient.wav")
-    pygame.mixer.music.play()
+    pygame.mixer.music.play(loops=100)
 except OSError as e:
-    # Graceful fallback if sounds missing
-    sound_lineclear = sound_levelup = sound_gameover = None
+    sound_startgame = sound_lineclear = sound_levelup = sound_gameover = None
+    print(f"[WARNING] {e}")
 # ==========================================
 
 # Screen setup
-WIDTH, HEIGHT = 768, 1280
-BLOCK_SIZE = 40
+WIDTH, HEIGHT = 768, 1024
+BLOCK_SIZE = 32
 COLS = WIDTH // BLOCK_SIZE
 ROWS = HEIGHT // BLOCK_SIZE
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Tezzertits")
+board_surface = pygame.Surface.convert_alpha(screen)
+pygame.display.set_caption("Tezzeretris")
 
 # Shapes and colors
 SHAPES = {
@@ -65,15 +68,15 @@ started = False
 score = 0
 level = 1
 lines_cleared = 0
-fall_speed = 700  # milliseconds, will go down with levels
+fall_speed = 400  # milliseconds, will go down with levels
 
 # Font for UI
 font = pygame.font.SysFont("Fira Code", 24)
 
-def play_level_up_effect(screen, level, board_surface=None):
+def play_level_up_effect(screen: pygame.Surface, level: int, board_surface : pygame.Surface = None):
     """Play a quick celebratory effect when leveling up."""
     clock2 = pygame.time.Clock()
-    font2 = pygame.font.SysFont("Crimson Pro", 60, bold=True)
+    font2 = pygame.font.SysFont("Montserrat", 60, bold=True)
 
     surf = font2.render(f"LEVEL {level}", True, (255, 40, 0))
     rect = surf.get_rect(center=(screen.get_width()//2, screen.get_height()//2))
@@ -86,7 +89,7 @@ def play_level_up_effect(screen, level, board_surface=None):
             random.randint(20, 60)                    # life frames
         ])
 
-    for frame in range(200):
+    for frame in range(100):
         if board_surface:
             screen.blit(board_surface, (0, 0))
         else:
@@ -110,7 +113,7 @@ def play_level_up_effect(screen, level, board_surface=None):
                 pygame.draw.circle(screen, (random.randint(100,255), random.randint(100,255), random.randint(100, 255), random.randint(1,10)/10), (int(p[0]), int(p[1])), 3)
 
         pygame.display.flip()
-        clock2.tick(30)
+        clock2.tick(60)
 
 class Piece:
     def __init__(self, shape):
@@ -149,61 +152,99 @@ def clear_lines():
     if cleared > 0:
         for _ in range(cleared):
             new_board.insert(0, [(0, 0, 0)] * COLS)
-        backup_board = board.copy()
         board = new_board
+
         # Scoring
         score += (cleared ** 2) * 100
         lines_cleared += cleared
 
-        # 🔊 Play line clear sound
         if sound_lineclear:
             sound_lineclear.play()
 
         # Level increase depending on level
-        if lines_cleared >= level * 10:
-            level_up(backup_board)
+        if lines_cleared >= level * 5:
+            level_up(pygame.Surface.convert_alpha(screen))
 
     return cleared
 
 
 def level_up(smuggled_board):
-    global level, fall_speed
+    global level, fall_speed, started
     level += 1
     fall_speed = max(100, fall_speed - 50)  # speed up
-
-    # Animation & sound
-    # level_transition_effect()
-
-    # board_surface = screen.copy()
-    play_level_up_effect(screen, level, smuggled_board)
 
     if sound_levelup:
         sound_levelup.play()
 
+    redrum_flash()
+    pygame.time.wait(1000)
+    play_level_up_effect(screen, level, smuggled_board)
+    started = False
 
-def level_transition_effect():
-    flash_colors = [(255, 255, 0), (255, 165, 0), (0, 255, 0), (0, 128, 255), (255, 0, 128)]
-    for color in flash_colors:
-        screen.fill(color)
+
+def redrum_flash():
+    eastern_roulette = [0, 255]
+    for color in range(255, 0, -1):
+        screen.fill((abs(random.choice(eastern_roulette)-color), abs(random.choice(eastern_roulette)-color), abs(random.choice(eastern_roulette)-color), random.random()))
         pygame.display.flip()
-        pygame.time.delay(150)
+        pygame.time.delay(1)
 
+def lotto_for_colors():
+    return random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), random.randint(0, 100) / 1000
 
-def draw_board():
+def prep_board(somesurface: pygame.Surface, colors: tuple):
+    b_cols = [[(0, 0, 0, 0.0) for _ in range(COLS)] for _ in range(ROWS)]
+    color_r, color_g, color_b, alpha = colors
+    alpha = 0.2
+    winner = max([color_r, color_g, color_b])
+    b_finished = pygame.Surface(somesurface.get_size())
+
+    for row in range(ROWS):
+        for col in range(COLS):
+            match int(winner):
+                case int(color_r):
+                    color_r = 255 - ((random.randint(0, 255) * 2) - 255)
+                    alpha = random.randint(0, 100) / 1000
+                case int(color_g):
+                    color_g = 255 - ((random.randint(0, 255) * 2) - 255)
+                    alpha = random.randint(0, 100) / 1000
+                case int(color_b):
+                    color_b = 255 - ((random.randint(0, 255) * 2) - 255)
+                    alpha = random.randint(0, 100) / 1000
+                case _:
+                    color_r = random.randint(150, 255)
+                    color_g = random.randint(150, 255)
+                    color_b = random.randint(150, 255)
+                    alpha = random.randint(0, 100) / 1000
+
+            b_cols[row][col] = (color_r, color_g, color_b, alpha)
+
     for y in range(ROWS):
         for x in range(COLS):
-            pygame.draw.rect(screen, board[y][x], (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 0)
-            pygame.draw.rect(screen, (10, 10, 30, 0.1), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 2)
+            pygame.draw.rect(b_finished, (random.randint(0, 20), random.randint(0, 20), random.randint(0, 20), random.randint(1,20)/1000), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 1)
+            pygame.draw.rect(b_finished, (b_cols[y][x][0], b_cols[y][x][1], b_cols[y][x][2], b_cols[y][x][3]),(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 1)
+
+    return b_finished
+
+def draw_board(board_surf: pygame.Surface):
+
+    screen.blit(board_surf, (0, 0))
+    # for y in range(ROWS):
+
+    #    for x in range(COLS):
+
+    #        pygame.draw.rect(board_surf, board[y][x], (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 0)
+    #        pygame.draw.rect(board_surf, (color_r, color_g, color_b, alpha), (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE), 1)
 
 
-def draw_piece(piece):
+def draw_piece(bsurf: pygame.Surface, piece):
     for y, row in enumerate(piece.shape):
         for x, cell in enumerate(row):
             if cell:
                 nx = (piece.x + x) * BLOCK_SIZE
                 ny = (piece.y + y) * BLOCK_SIZE
-                pygame.draw.rect(screen, piece.color, (nx, ny, BLOCK_SIZE, BLOCK_SIZE), 0)
-                pygame.draw.rect(screen, (200, 200, 200), (nx, ny, BLOCK_SIZE, BLOCK_SIZE), 1)
+                pygame.draw.rect(bsurf, piece.color, (nx, ny, BLOCK_SIZE, BLOCK_SIZE), 0)
+                pygame.draw.rect(bsurf, (200, 200, 200), (nx, ny, BLOCK_SIZE, BLOCK_SIZE), 1)
 
 
 def draw_ui():
@@ -221,9 +262,11 @@ def draw_ui():
 clock = pygame.time.Clock()
 current_piece = Piece(random.choice(list(SHAPES.keys())))
 fall_time = 0
+level_r, level_g, level_b = random.randint(1, 100), random.randint(1, 100), random.randint(1, 100)
+board_surf = prep_board(screen, (level_r, level_g, level_b, random.randint(1, 100) / 100))
 
 while True:
-    dt = clock.tick(60)
+    dt = clock.tick(120)
     fall_time += dt
 
     for event in pygame.event.get():
@@ -245,12 +288,12 @@ while True:
             elif event.key == pygame.K_SPACE:
                 while current_piece.valid():
                     current_piece.y += 1
-                    draw_piece(current_piece)
+                    draw_piece(board_surf, current_piece)
+                    screen.blit(board_surf, (0, 0))
                     pygame.display.flip()
                 current_piece.y -= 1
             elif event.key == pygame.K_KP_PLUS:
-                smugglers_surface = pygame.Surface.copy(screen)
-                level_up(smugglers_surface)
+                level_up(board_surf)
 
     if fall_time > fall_speed:
         if current_piece.valid(dy=1):
@@ -259,17 +302,20 @@ while True:
             cleared = current_piece.place()
             current_piece = Piece(random.choice(list(SHAPES.keys())))
             if not current_piece.valid():
-                # 🔊 Game over sound
+
                 if sound_gameover:
                     sound_gameover.play()
                     pygame.time.delay(4000)  # wait so player hears it
+
                 print("GAME OVER! Final Score:", score)
                 pygame.quit()
                 sys.exit()
         fall_time = 0
 
     screen.fill((0, 0, 0))
-    draw_board()
-    draw_piece(current_piece)
+    proper_board = prep_board(board_surf, lotto_for_colors())
+    draw_board(proper_board)
+    draw_piece(proper_board, current_piece)
+    screen.blit(proper_board, (0, 0))
     draw_ui()
     pygame.display.flip()
