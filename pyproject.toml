@@ -2,7 +2,7 @@
 name = "Tezzeretris"
 version = "0.1.0"
 description = "Vibe coding test"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
-    "pygame>=2.6.1",
+    "pygame>=2.5.1",
 ]
