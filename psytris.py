@@ -144,7 +144,7 @@ def hsv_colour(hue: float, saturation: float = 1.0, value: float = 1.0) -> pg.Co
 
 
 def load_font(size: int, bold: bool = False) -> pg.font.Font:
-	for name in ("Montserrat", "Fira Code", "DejaVu Sans", "Arial"):
+	for name in ("Fira Code", "DejaVu Sans", "Arial"):
 		path = pg.font.match_font(name, bold=bold)
 		if path:
 			return pg.font.Font(path, size)
@@ -167,6 +167,7 @@ class Audio:
 			"level": None,
 			"game_over": None,
 			"start": None,
+			"drop": None
 		}
 
 		try:
@@ -178,10 +179,11 @@ class Audio:
 			return
 
 		files = {
-			"clear": "new_linescore.wav",
+			"clear": "linescore.wav",
 			"level": "levelup.wav",
 			"game_over": "gameover.wav",
 			"start": "start.wav",
+			"drop": "drop.wav"
 		}
 
 		for name, filename in files.items():
@@ -193,7 +195,7 @@ class Audio:
 		music = asset_path("background_ambient.wav")
 		try:
 			pg.mixer.music.load(music)
-			pg.mixer.music.set_volume(0.42)
+			pg.mixer.music.set_volume(1.00)
 			pg.mixer.music.play(-1)
 		except (FileNotFoundError, pg.error):
 			pass
@@ -314,56 +316,211 @@ class ScorePopup:
 		self.age += dt
 		return self.age < self.duration
 
+	@staticmethod
+	def outlined_text(
+		font: pg.font.Font,
+		text: str,
+		colour: pg.Color | tuple[int, int, int] | str,
+		outline_width: int = 2,
+	) -> pg.Surface:
+		"""
+		Piirtää tekstin läpinäkyvälle pinnalle niin, että sen ympärillä
+		on oikea musta reunus. Ei käytä maskeja tai additiivista blittausta.
+		"""
+
+		foreground = font.render(text, True, colour).convert_alpha()
+		outline = font.render(text, True, (0, 0, 0)).convert_alpha()
+
+		padding = outline_width + 2
+
+		result = pg.Surface(
+			(
+				foreground.get_width() + padding * 2,
+				foreground.get_height() + padding * 2,
+			),
+			pg.SRCALPHA,
+		)
+
+		centre_x = padding
+		centre_y = padding
+
+		for offset_y in range(-outline_width, outline_width + 1):
+			for offset_x in range(-outline_width, outline_width + 1):
+				if offset_x == 0 and offset_y == 0:
+					continue
+
+				# Jätetään aivan kauimmaiset kulmapikselit pois,
+				# jolloin reunuksesta tulee pyöreämpi.
+				if offset_x * offset_x + offset_y * offset_y > outline_width * outline_width + 1:
+					continue
+
+				result.blit(
+					outline,
+					(
+						centre_x + offset_x,
+						centre_y + offset_y,
+					),
+				)
+
+		result.blit(
+			foreground,
+			(centre_x, centre_y),
+		)
+
+		return result
+
 	def draw_rainbow_text(
 		self,
 		surface: pg.Surface,
-		base: pg.Surface,
 		centre: pg.Vector2,
 		angle: float,
 		scale: float,
 		alpha: int,
 	) -> None:
-		for trail in range(5, 0, -1):
-			trail_hue = self.hue + trail * 0.075 + self.age * 0.45
+		# Värilliset jälkikuvat piirretään ensin.
+		for trail in range(4, 0, -1):
+			trail_hue = (
+				self.hue
+				+ trail * 0.085
+				+ self.age * 0.45
+			)
+
 			colour = hsv_colour(trail_hue)
-			copy = base.copy()
-			copy.fill((*colour[:3], 255), special_flags=pg.BLEND_RGBA_MULT)
-			copy.set_alpha(max(0, round(alpha * (0.08 + trail * 0.025))))
+
+			trail_text = self.outlined_text(
+				self.font,
+				self.text,
+				colour,
+				outline_width=2,
+			)
+
+			trail_text.set_alpha(
+				max(
+					0,
+					round(alpha * (0.08 + trail * 0.025)),
+				)
+			)
+
 			transformed = pg.transform.rotozoom(
-				copy,
+				trail_text,
 				angle - trail * 1.7,
 				max(0.02, scale + trail * 0.035),
 			)
-			offset = pg.Vector2(-trail * 2.5, trail * 1.5)
+
+			offset = pg.Vector2(
+				-trail * 2.5,
+				trail * 1.5,
+			)
+
+			# Tavallinen alpha-blittaus. Ei BLEND_RGBA_ADD-lippua.
 			surface.blit(
 				transformed,
 				transformed.get_rect(center=centre + offset),
-				special_flags=pg.BLEND_RGBA_ADD,
 			)
 
-		main = pg.transform.rotozoom(base, angle, max(0.02, scale))
-		main.set_alpha(alpha)
-		surface.blit(main, main.get_rect(center=centre))
+		# Varsinainen valkoinen pisteteksti piirretään viimeisenä.
+		main_text = self.outlined_text(
+			self.font,
+			self.text,
+			(255, 255, 255),
+			outline_width=2,
+		)
+
+		main_text = pg.transform.rotozoom(
+			main_text,
+			angle,
+			max(0.02, scale),
+		)
+
+		main_text.set_alpha(alpha)
+
+		surface.blit(
+			main_text,
+			main_text.get_rect(center=centre),
+		)
 
 	def draw(self, surface: pg.Surface) -> None:
-		t = clamp(self.age / self.duration, 0.0, 1.0)
-		intro = clamp(t / 0.24, 0.0, 1.0)
-		outro = clamp((1.0 - t) / 0.30, 0.0, 1.0)
-		alpha = round(255 * min(1.0, outro * 1.5))
+		t = clamp(
+			self.age / self.duration,
+			0.0,
+			1.0,
+		)
 
-		scale = 0.18 + 1.18 * ease_out_back(intro)
-		scale *= 1.0 + math.sin(self.age * 16.0) * 0.045
-		angle = math.sin(self.age * 11.0) * 13.0 * (1.0 - t)
-		centre = self.position + pg.Vector2(0, -95.0 * ease_out_cubic(t))
+		intro = clamp(
+			t / 0.24,
+			0.0,
+			1.0,
+		)
 
-		base = self.font.render(self.text, True, "white").convert_alpha()
-		self.draw_rainbow_text(surface, base, centre, angle, scale, alpha)
+		outro = clamp(
+			(1.0 - t) / 0.30,
+			0.0,
+			1.0,
+		)
+
+		alpha = round(
+			255 * min(1.0, outro * 1.5)
+		)
+
+		scale = (
+			0.18
+			+ 1.18 * ease_out_back(intro)
+		)
+
+		scale *= (
+			1.0
+			+ math.sin(self.age * 16.0) * 0.045
+		)
+
+		angle = (
+			math.sin(self.age * 11.0)
+			* 13.0
+			* (1.0 - t)
+		)
+
+		centre = (
+			self.position
+			+ pg.Vector2(
+				0,
+				-95.0 * ease_out_cubic(t),
+			)
+		)
+
+		self.draw_rainbow_text(
+			surface,
+			centre,
+			angle,
+			scale,
+			alpha,
+		)
 
 		if self.subtext:
-			sub = self.small_font.render(self.subtext, True, hsv_colour(self.hue + self.age * 0.25))
-			sub.set_alpha(alpha)
-			sub_centre = centre + pg.Vector2(0, 58 * scale)
-			surface.blit(sub, sub.get_rect(center=sub_centre))
+			colour = hsv_colour(
+				self.hue
+				+ self.age * 0.25
+			)
+
+			subtext = self.outlined_text(
+				self.small_font,
+				self.subtext,
+				colour,
+				outline_width=2,
+			)
+
+			subtext.set_alpha(alpha)
+
+			subtext_centre = (
+				centre
+				+ pg.Vector2(
+					0,
+					58 * scale,
+				)
+			)
+
+			surface.blit(
+				subtext,
+				subtext.get_rect(center=subtext_centre),
+			)
 
 
 class LevelPopup:
@@ -378,29 +535,111 @@ class LevelPopup:
 		return self.age < self.duration
 
 	def draw(self, surface: pg.Surface) -> None:
-		t = clamp(self.age / self.duration, 0.0, 1.0)
-		alpha = round(255 * min(1.0, (1.0 - t) * 2.7))
-		scale = 0.25 + 1.4 * ease_out_back(clamp(t / 0.28, 0.0, 1.0))
-		scale *= 1.0 + math.sin(self.age * 13.0) * 0.055
-		angle = math.sin(self.age * 8.0) * 7.0
+		t = clamp(
+			self.age / self.duration,
+			0.0,
+			1.0,
+		)
 
-		text = self.font.render(f"LEVEL {self.level}", True, "white").convert_alpha()
-		for index in range(8, 0, -1):
-			copy = text.copy()
-			colour = hsv_colour(self.age * 0.45 + index / 8.0)
-			copy.fill((*colour[:3], 255), special_flags=pg.BLEND_RGBA_MULT)
-			copy.set_alpha(round(alpha * 0.075))
-			layer = pg.transform.rotozoom(copy, angle + index * 1.2, scale + index * 0.045)
-			surface.blit(
-				layer,
-				layer.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)),
-				special_flags=pg.BLEND_RGBA_ADD,
+		intro = clamp(
+			t / 0.28,
+			0.0,
+			1.0,
+		)
+
+		outro = clamp(
+			(1.0 - t) / 0.32,
+			0.0,
+			1.0,
+		)
+
+		alpha = round(
+			255 * min(1.0, outro * 1.6)
+		)
+
+		scale = (
+			0.25
+			+ 1.4 * ease_out_back(intro)
+		)
+
+		scale *= (
+			1.0
+			+ math.sin(self.age * 13.0) * 0.055
+		)
+
+		angle = (
+			math.sin(self.age * 8.0)
+			* 7.0
+		)
+
+		centre = (
+			WINDOW_WIDTH // 2,
+			WINDOW_HEIGHT // 2,
+		)
+
+		text_value = f"LEVEL {self.level}"
+
+		# Värilliset jälkikuvat piirretään ensin tavallisella
+		# alpha-blittauksella. Ei BLEND_RGBA_ADD-lippua.
+		for index in range(7, 0, -1):
+			colour = hsv_colour(
+				self.age * 0.45
+				+ index / 7.0
 			)
 
-		main = pg.transform.rotozoom(text, angle, scale)
-		main.set_alpha(alpha)
-		surface.blit(main, main.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)))
+			trail = ScorePopup.outlined_text(
+				self.font,
+				text_value,
+				colour,
+				outline_width=2,
+			)
 
+			trail.set_alpha(
+				round(
+					alpha
+					* (0.035 + index * 0.008)
+				)
+			)
+
+			trail = pg.transform.rotozoom(
+				trail,
+				angle + index * 1.2,
+				scale + index * 0.04,
+			)
+
+			offset = pg.Vector2(
+				math.sin(index * 1.8) * index * 1.5,
+				math.cos(index * 1.4) * index * 1.5,
+			)
+
+			surface.blit(
+				trail,
+				trail.get_rect(
+					center=pg.Vector2(centre) + offset,
+				),
+			)
+
+		# Varsinainen LEVEL-teksti piirretään viimeisenä kaikkien
+		# värijälkien päälle.
+		main = ScorePopup.outlined_text(
+			self.font,
+			text_value,
+			(255, 255, 255),
+			outline_width=2,
+		)
+
+		main = pg.transform.rotozoom(
+			main,
+			angle,
+			scale,
+		)
+
+		main.set_alpha(alpha)
+
+		surface.blit(
+			main,
+			main.get_rect(center=centre),
+		)
 
 class ScreenPulse:
 	def __init__(self, hue: float, duration: float = 0.45, strength: int = 95) -> None:
@@ -548,11 +787,33 @@ class PsyBackground:
 			target.get_height() / 2 + math.cos(t * 0.37) * 110,
 		)
 		for index in range(8):
-			radius = int((t * 75 + index * 115) % 920)
-			colour = hsv_colour(t * 0.08 + index / 8)
-			alpha = int(34 * (1.0 - radius / 920))
-			pg.draw.circle(rings, (*colour[:3], alpha), centre, radius, width=4)
-		target.blit(rings, (0, 0), special_flags=pg.BLEND_RGBA_ADD)
+			radius = int(
+				(t * 75 + index * 115) % 920
+			)
+
+			colour = hsv_colour(
+				t * 0.08 + index / 8
+			)
+
+			alpha = int(
+				34 * (1.0 - radius / 920)
+			)
+
+			pg.draw.circle(
+				rings,
+				(*colour[:3], alpha),
+				centre,
+				radius,
+				width=4,
+			)
+
+		rings.set_alpha(128)
+
+		target.blit(
+			rings,
+			(0, 0),
+			special_flags=pg.BLEND_RGBA_ADD,
+		)
 
 
 # ---------------------------------------------------------------------------
@@ -685,11 +946,25 @@ class Psytris:
 			return
 
 		distance = 0
+
 		while self.is_valid(self.current, dy=1):
 			self.current.y += 1
 			distance += 1
 
 		self.score += distance * 2
+
+		if distance > 0:
+			volume = clamp(
+				0.35 + distance * 0.025,
+				0.35,
+				0.85,
+			)
+
+			self.audio.play(
+				"drop",
+				volume,
+			)
+
 		self.lock_piece()
 
 	def hold(self) -> None:
@@ -909,6 +1184,11 @@ class Psytris:
 		else:
 			self.lock_elapsed += dt_ms
 			if self.lock_elapsed >= LOCK_DELAY:
+				self.audio.play(
+					"drop",
+					0.28,
+				)
+
 				self.lock_piece()
 
 	def draw_block(
@@ -1159,31 +1439,88 @@ class Psytris:
 
 		pg.display.flip()
 
-	def draw_overlay(self, heading: str, subheading: str) -> None:
-		overlay = pg.Surface(self.screen.get_size(), pg.SRCALPHA)
+	def draw_overlay(
+		self,
+		heading: str,
+		subheading: str,
+	) -> None:
+		overlay = pg.Surface(
+			self.screen.get_size(),
+			pg.SRCALPHA,
+		)
+
 		overlay.fill((0, 0, 8, 175))
 		self.screen.blit(overlay, (0, 0))
 
+		heading_centre = (
+			WINDOW_WIDTH // 2,
+			WINDOW_HEIGHT // 2 - 25,
+		)
+
 		hue = self.background.time * 0.12
-		for index in range(8, 0, -1):
-			text = self.pause_font.render(heading, True, hsv_colour(hue + index * 0.07))
-			text.set_alpha(25)
-			scaled = pg.transform.rotozoom(
-				text,
-				math.sin(self.background.time * 2.0 + index) * 2.0,
+
+		# Värilliset jälkikuvat piirretään ilman additiivista blittausta.
+		for index in range(6, 0, -1):
+			colour = hsv_colour(
+				hue + index * 0.09
+			)
+
+			trail = ScorePopup.outlined_text(
+				self.pause_font,
+				heading,
+				colour,
+				outline_width=2,
+			)
+
+			trail.set_alpha(25)
+
+			trail = pg.transform.rotozoom(
+				trail,
+				math.sin(
+					self.background.time * 2.0
+					+ index
+				) * 2.0,
 				1.0 + index * 0.025,
 			)
+
 			self.screen.blit(
-				scaled,
-				scaled.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 25)),
-				special_flags=pg.BLEND_RGBA_ADD,
+				trail,
+				trail.get_rect(
+					center=heading_centre,
+				),
 			)
 
-		main = self.pause_font.render(heading, True, "white")
-		self.screen.blit(main, main.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 25)))
+		# Varsinainen teksti piirretään aina päällimmäiseksi.
+		main = ScorePopup.outlined_text(
+			self.pause_font,
+			heading,
+			(255, 255, 255),
+			outline_width=2,
+		)
 
-		sub = self.ui_font.render(subheading, True, (210, 220, 255))
-		self.screen.blit(sub, sub.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 55)))
+		self.screen.blit(
+			main,
+			main.get_rect(
+				center=heading_centre,
+			),
+		)
+
+		sub = ScorePopup.outlined_text(
+			self.ui_font,
+			subheading,
+			(210, 220, 255),
+			outline_width=2,
+		)
+
+		self.screen.blit(
+			sub,
+			sub.get_rect(
+				center=(
+					WINDOW_WIDTH // 2,
+					WINDOW_HEIGHT // 2 + 55,
+				),
+			),
+		)
 
 	def run(self) -> None:
 		while self.running:
@@ -1214,7 +1551,3 @@ def main() -> None:
 
 if __name__ == "__main__":
 	main()
-
-path = Path("/mnt/data/psytris.py")
-path.write_text(code, encoding="utf-8")
-print(f"Wrote {path} ({len(code.splitlines())} lines)")
