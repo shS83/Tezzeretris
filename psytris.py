@@ -252,6 +252,73 @@ class SevenBag:
 # ---------------------------------------------------------------------------
 # Effects
 # ---------------------------------------------------------------------------
+class ScreenShake:
+	def __init__(self) -> None:
+		self.duration = 0.0
+		self.remaining = 0.0
+		self.strength = 0.0
+
+	def start(
+		self,
+		strength: float,
+		duration: float,
+	) -> None:
+		"""
+		Uusi voimakkaampi tärähdys korvaa heikomman.
+		Voimakkaampi olemassa oleva tärähdys ei heikkene uuden vuoksi.
+		"""
+
+		self.strength = max(
+			self.strength,
+			strength,
+		)
+
+		self.duration = max(
+			self.duration,
+			duration,
+		)
+
+		self.remaining = max(
+			self.remaining,
+			duration,
+		)
+
+	def update(self, dt: float) -> None:
+		if self.remaining <= 0.0:
+			self.remaining = 0.0
+			self.strength = 0.0
+			return
+
+		self.remaining -= dt
+
+	def offset(self) -> pg.Vector2:
+		if self.remaining <= 0.0 or self.duration <= 0.0:
+			return pg.Vector2()
+
+		progress = clamp(
+			self.remaining / self.duration,
+			0.0,
+			1.0,
+		)
+
+		# Tärinä vaimenee nopeasti loppua kohti.
+		current_strength = (
+			self.strength
+			* progress
+			* progress
+		)
+
+		return pg.Vector2(
+			random.uniform(
+				-current_strength,
+				current_strength,
+			),
+			random.uniform(
+				-current_strength,
+				current_strength,
+			),
+		)
+
 
 @dataclass
 class Particle:
@@ -826,6 +893,11 @@ class Psytris:
 		pg.display.set_caption("PSYTRIS")
 		self.fullscreen = False
 		self.screen = pg.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+		self.canvas = pg.Surface(
+			(WINDOW_WIDTH, WINDOW_HEIGHT)
+		).convert()
+
+		self.shake = ScreenShake()
 		self.clock = pg.time.Clock()
 
 		self.audio = Audio()
@@ -965,6 +1037,18 @@ class Psytris:
 				volume,
 			)
 
+		if distance > 0:
+			strength = clamp(
+				2.0 + distance * 0.28,
+				2.0,
+				7.0,
+			)
+
+			self.shake.start(
+				strength=strength,
+				duration=0.13,
+			)
+
 		self.lock_piece()
 
 	def hold(self) -> None:
@@ -1034,6 +1118,24 @@ class Psytris:
 		self.effects.line_burst(rows, cleared)
 		self.effects.score_popup(self.pending_points, cleared, self.combo)
 		self.effects.pulse(60 + cleared * 18)
+		shake_strengths = {
+			1: 2.0,
+			2: 3.5,
+			3: 5.0,
+			4: 8.5,
+		}
+
+		shake_durations = {
+			1: 0.10,
+			2: 0.14,
+			3: 0.18,
+			4: 0.26,
+		}
+
+		self.shake.start(
+			strength=shake_strengths.get(cleared, 2.0),
+			duration=shake_durations.get(cleared, 0.10),
+		)
 		self.audio.play("clear", min(1.0, 0.50 + cleared * 0.12))
 
 		if self.level > old_level:
@@ -1157,6 +1259,7 @@ class Psytris:
 			self.soft_drop_elapsed = 0.0
 
 	def update(self, dt: float, dt_ms: float) -> None:
+		self.shake.update(dt)
 		self.background.update(dt)
 		self.effects.update(dt)
 
@@ -1396,8 +1499,14 @@ class Psytris:
 			surface.blit(rendered, (28, 470 + index * 28))
 
 	def draw(self) -> None:
-		self.background.draw(self.screen, intensity=1.0 + min(self.level, 15) * 0.025)
-		self.draw_board_frame(self.screen)
+		target = self.canvas
+
+		self.background.draw(
+			target,
+			intensity=1.0 + min(self.level, 15) * 0.025,
+		)
+
+		self.draw_board_frame(target)
 
 		# Settled blocks.
 		clear_progress = clamp(self.clear_elapsed / CLEAR_DELAY, 0.0, 1.0)
@@ -1406,14 +1515,14 @@ class Psytris:
 				if kind is None:
 					continue
 				progress = clear_progress if y in self.clearing_rows else None
-				self.draw_block(self.screen, x, y, kind, clear_progress=progress)
+				self.draw_block(target, x, y, kind, clear_progress=progress)
 
 		# Ghost and active piece are hidden during line-clear animation.
 		if not self.clearing_rows and not self.game_over:
 			ghost_y = self.ghost_y()
 			for cell_x, cell_y in self.current.cells():
 				self.draw_block(
-					self.screen,
+					target,
 					self.current.x + cell_x,
 					ghost_y + cell_y,
 					self.current.kind,
@@ -1422,35 +1531,47 @@ class Psytris:
 
 			for cell_x, cell_y in self.current.cells():
 				self.draw_block(
-					self.screen,
+					target,
 					self.current.x + cell_x,
 					self.current.y + cell_y,
 					self.current.kind,
 				)
 
-		self.effects.draw_board_effects(self.screen)
-		self.draw_ui(self.screen)
-		self.effects.draw_foreground(self.screen)
+		self.effects.draw_board_effects(target)
+		self.draw_ui(target)
+		self.effects.draw_foreground(target)
 
 		if self.paused:
-			self.draw_overlay("PAUSED", "P or Esc to continue")
+			self.draw_overlay(target, "PAUSED", "P or Esc to continue")
 		elif self.game_over:
-			self.draw_overlay("GAME OVER", f"Score {self.score:,} — press R to restart")
+			self.draw_overlay(target, "GAME OVER", f"Score {self.score:,} — press R to restart")
+
+		offset = self.shake.offset()
+
+		self.screen.fill((0, 0, 0))
+
+		self.screen.blit(
+			target,
+			(
+				round(offset.x),
+				round(offset.y),
+			),
+		)
 
 		pg.display.flip()
 
 	def draw_overlay(
 		self,
+		surface: pg.Surface,
 		heading: str,
-		subheading: str,
-	) -> None:
+		subheading: str) -> None:
 		overlay = pg.Surface(
-			self.screen.get_size(),
+			surface.get_size(),
 			pg.SRCALPHA,
 		)
 
 		overlay.fill((0, 0, 8, 175))
-		self.screen.blit(overlay, (0, 0))
+		surface.blit(overlay, (0, 0))
 
 		heading_centre = (
 			WINDOW_WIDTH // 2,
@@ -1483,7 +1604,7 @@ class Psytris:
 				1.0 + index * 0.025,
 			)
 
-			self.screen.blit(
+			surface.blit(
 				trail,
 				trail.get_rect(
 					center=heading_centre,
@@ -1498,7 +1619,7 @@ class Psytris:
 			outline_width=2,
 		)
 
-		self.screen.blit(
+		surface.blit(
 			main,
 			main.get_rect(
 				center=heading_centre,
@@ -1512,7 +1633,7 @@ class Psytris:
 			outline_width=2,
 		)
 
-		self.screen.blit(
+		surface.blit(
 			sub,
 			sub.get_rect(
 				center=(
