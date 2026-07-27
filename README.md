@@ -1,5 +1,5 @@
 ###  Vibin' and Codin'
-# TEZZERETRIS!!
+# PSYTRIS
 Absolutely unbemazing and maybe the greatest game on earth (totally original idea, not plagiarized from anywhere). 
 
 I can't stop playing.
