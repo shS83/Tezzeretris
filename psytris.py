@@ -179,7 +179,7 @@ class Audio:
 			return
 
 		files = {
-			"clear": "linescore.wav",
+			"clear": "new_linescore.wav",
 			"level": "levelup.wav",
 			"game_over": "gameover.wav",
 			"start": "start.wav",
@@ -781,39 +781,39 @@ class PsyBackground:
 		target.blit(scaled, (0, 0))
 
 		# Slow transparent rotating rings over the plasma.
-		rings = pg.Surface(target.get_size(), pg.SRCALPHA)
-		centre = pg.Vector2(
-			target.get_width() / 2 + math.sin(t * 0.43) * 150,
-			target.get_height() / 2 + math.cos(t * 0.37) * 110,
-		)
-		for index in range(8):
-			radius = int(
-				(t * 75 + index * 115) % 920
-			)
-
-			colour = hsv_colour(
-				t * 0.08 + index / 8
-			)
-
-			alpha = int(
-				34 * (1.0 - radius / 920)
-			)
-
-			pg.draw.circle(
-				rings,
-				(*colour[:3], alpha),
-				centre,
-				radius,
-				width=4,
-			)
-
-		rings.set_alpha(128)
-
-		target.blit(
-			rings,
-			(0, 0),
-			special_flags=pg.BLEND_RGBA_ADD,
-		)
+		# rings = pg.Surface(target.get_size(), pg.SRCALPHA)
+		# centre = pg.Vector2(
+		# 	target.get_width() / 2 + math.sin(t * 0.43) * 150,
+		# 	target.get_height() / 2 + math.cos(t * 0.37) * 110,
+		# )
+		# for index in range(8):
+		# 	radius = int(
+		# 		(t * 75 + index * 115) % 920
+		# 	)
+		#
+		# 	colour = hsv_colour(
+		# 		t * 0.08 + index / 8
+		# 	)
+		#
+		# 	alpha = int(
+		# 		34 * (1.0 - radius / 920)
+		# 	)
+		#
+		# 	pg.draw.circle(
+		# 		rings,
+		# 		(*colour[:3], alpha),
+		# 		centre,
+		# 		radius,
+		# 		width=4,
+		# 	)
+		#
+		# rings.set_alpha(128)
+		#
+		# target.blit(
+		# 	rings,
+		# 	(0, 0),
+		# 	special_flags=pg.BLEND_RGBA_ADD,
+		# )
 
 
 # ---------------------------------------------------------------------------
